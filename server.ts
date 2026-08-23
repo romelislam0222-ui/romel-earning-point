@@ -4,9 +4,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const archiver = require('archiver');
+// @ts-ignore
+import archiverPkg from 'archiver';
+const archiver = archiverPkg;
 import type { AppDatabaseState, NotificationItem, WSMessage } from './src/types';
 
 const __filename = fileURLToPath(import.meta.url);
