@@ -9,8 +9,7 @@ import archiverPkg from 'archiver';
 const archiver = archiverPkg;
 import type { AppDatabaseState, NotificationItem, WSMessage } from './src/types';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = process.cwd();
 
 const PORT = 3000;
 const DATA_DIR = path.join(__dirname, 'data');
