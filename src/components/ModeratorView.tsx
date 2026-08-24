@@ -36,6 +36,7 @@ interface ModeratorViewProps {
   onVerifyWithdrawal: (id: number) => void;
   onRejectWithdrawal: (id: number, reason?: string) => void;
   onBroadcastNotif: (notif: { title: string; body: string; type?: 'info' | 'reward' | 'urgent'; targetUserId?: number | 'all' }) => void;
+  onAdjustBalance: (userId: number, amount: number) => void;
   onToast: (msg: string) => void;
 }
 
@@ -49,10 +50,14 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
   onVerifyWithdrawal,
   onRejectWithdrawal,
   onBroadcastNotif,
+  onAdjustBalance,
   onToast
 }) => {
   const isFull = role === 'full';
-  const [activeTab, setActiveTab] = useState<'submissions' | 'withdrawals' | 'tasks' | 'earns' | 'movies' | 'apps' | 'users' | 'broadcast' | 'settings' | 'support' | 'submods' | 'requests' | 'notices'>(isFull ? 'submissions' : 'tasks');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'withdrawals' | 'tasks' | 'earns' | 'movies' | 'apps' | 'users' | 'broadcast' | 'settings' | 'support' | 'submods' | 'requests' | 'notices'>('submissions');
+
+  // Balance top-up form (Full Moderator only)
+  const [balanceDrafts, setBalanceDrafts] = useState<Record<number, string>>({});
 
   // Support reply form
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
@@ -287,9 +292,18 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
               { id: 'settings', label: 'Global Settings' }
             ]
           : [
+              { id: 'submissions', label: `Task Proofs (${pendingSubmissions.length})` },
+              { id: 'withdrawals', label: `Withdrawals (${pendingWithdrawals.length})` },
               { id: 'tasks', label: `Tasks (${db.tasks.length})` },
+              { id: 'earns', label: `Daily Earns (${db.earns.length})` },
+              { id: 'movies', label: `Movies (${db.movies.length})` },
+              { id: 'apps', label: `Apps (${db.apps.length})` },
+              { id: 'requests', label: `Requests (${(db.contentRequests || []).filter(r => r.status === 'pending').length})` },
               { id: 'support', label: `Help Desk (${(db.support || []).filter(s => !s.reply).length})` },
-              { id: 'requests', label: `Requests (${(db.contentRequests || []).filter(r => r.status === 'pending').length})` }
+              { id: 'users', label: `Users (${db.users.length})` },
+              { id: 'notices', label: `Notices (${(db.notices || []).length})` },
+              { id: 'broadcast', label: 'Broadcast Notif' },
+              { id: 'settings', label: 'Global Settings' }
             ]
         ).map((t) => (
           <button
@@ -813,6 +827,7 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
                   <th className="p-3">Country</th>
                   <th className="p-3">Balance</th>
                   <th className="p-3">Joined Date</th>
+                  {isFull && <th className="p-3">Add Balance</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -824,11 +839,45 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
                     <td className="p-3">{u.country || 'Bangladesh'}</td>
                     <td className="p-3 font-black text-amber-400">৳{(db.balances[u.id] || 0).toFixed(2)}</td>
                     <td className="p-3 text-slate-500 text-[11px]">{u.createdAt}</td>
+                    {isFull && (
+                      <td className="p-3">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            placeholder="৳ Amount"
+                            value={balanceDrafts[u.id] ?? ''}
+                            onChange={(e) => setBalanceDrafts(prev => ({ ...prev, [u.id]: e.target.value }))}
+                            className="w-24 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-slate-200"
+                          />
+                          <button
+                            onClick={() => {
+                              const raw = (balanceDrafts[u.id] ?? '').trim();
+                              const amount = parseFloat(raw);
+                              if (!raw || isNaN(amount) || amount === 0) {
+                                onToast('❌ Enter a valid amount.');
+                                return;
+                              }
+                              onAdjustBalance(u.id, amount);
+                              setBalanceDrafts(prev => ({ ...prev, [u.id]: '' }));
+                              onToast(`✅ ৳${amount.toFixed(2)} added to ${u.name}'s balance.`);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] whitespace-nowrap flex items-center gap-1"
+                          >
+                            <Coins className="w-3.5 h-3.5" /> Add
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {!isFull && (
+            <p className="text-[11px] text-slate-500 italic">
+              Only the Main Moderator can add balance to a user's account.
+            </p>
+          )}
         </div>
       )}
 
@@ -1145,7 +1194,7 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
       )}
 
       {/* TAB: DASHBOARD NOTICES (full moderator only) */}
-      {activeTab === 'notices' && isFull && (
+      {activeTab === 'notices' && (
         <div className="space-y-6">
           <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
             <h3 className="text-sm font-bold text-slate-200 mb-3 flex items-center gap-2">
