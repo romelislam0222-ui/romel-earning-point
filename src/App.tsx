@@ -61,6 +61,7 @@ const initialAppState: AppDatabaseState = {
   subModerators: [],
   contentRequests: [],
   notices: [],
+  promoCodes: [],
   unlockedMovies: {},
   unlockedApps: {},
   referrals: {},
@@ -71,7 +72,8 @@ const initialAppState: AppDatabaseState = {
     broadcastBanner: '📢 Welcome to ROMEL EARNING POINT!',
     bannerActive: true,
     promotionPaymentNumber: '01334788303',
-    minWithdrawal: 700
+    minWithdrawal: 700,
+    referralBonus: 25
   }
 };
 
@@ -118,6 +120,9 @@ export default function App() {
   // Content request forms
   const [movieRequestText, setMovieRequestText] = useState('');
   const [appRequestText, setAppRequestText] = useState('');
+
+  // Promo code redemption
+  const [promoCodeInput, setPromoCodeInput] = useState('');
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -192,7 +197,48 @@ export default function App() {
     } else {
       setShowOnboarding(true);
     }
+
+    // Restore a previously logged-in Moderator / Sub-Moderator session
+    // so they don't have to re-enter their password after closing the app.
+    const savedMod = localStorage.getItem('romel_moderator_session');
+    if (savedMod) {
+      try {
+        const parsed = JSON.parse(savedMod);
+        if (parsed && (parsed.role === 'full' || parsed.role === 'sub')) {
+          setIsModerator(true);
+          setModeratorRole(parsed.role);
+          setSubModeratorId(parsed.subModeratorId ?? null);
+        }
+      } catch (e) {
+        localStorage.removeItem('romel_moderator_session');
+      }
+    }
   }, []);
+
+  // If a restored Sub-Moderator session's account was later disabled or
+  // removed by the Main Moderator, revoke access automatically.
+  useEffect(() => {
+    if (isModerator && moderatorRole === 'sub' && subModeratorId != null && db.subModerators) {
+      const stillValid = db.subModerators.some(sm => sm.id === subModeratorId && sm.active);
+      if (!stillValid) {
+        setIsModerator(false);
+        setModeratorRole(null);
+        setSubModeratorId(null);
+        localStorage.removeItem('romel_moderator_session');
+        showToast('❌ Your Sub-Moderator access has been revoked.');
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db.subModerators]);
+
+  const handleModeratorLogout = () => {
+    setIsModerator(false);
+    setModeratorRole(null);
+    setSubModeratorId(null);
+    setActiveTab('tasks');
+    localStorage.removeItem('romel_moderator_session');
+    showToast('👋 Logged out of Moderator panel.');
+  };
 
   const sendAction = (action: string, data: any) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -250,6 +296,59 @@ export default function App() {
     showToast('✅ Your request has been sent to the Moderator team.');
   };
 
+  const handleRedeemPromoCode = () => {
+    if (!currentUser) return;
+    const code = promoCodeInput.trim();
+    if (!code) {
+      showToast('❌ Please enter a promo code.');
+      return;
+    }
+    const promo = (db.promoCodes || []).find(
+      p => p.code.trim().toLowerCase() === code.toLowerCase()
+    );
+    if (!promo) {
+      showToast('❌ Invalid promo code.');
+      return;
+    }
+    if (!promo.active) {
+      showToast('❌ This promo code is no longer active.');
+      return;
+    }
+    if ((promo.usedBy || []).includes(currentUser.id)) {
+      showToast('❌ You have already used this promo code.');
+      return;
+    }
+    if (promo.maxUses > 0 && (promo.usedBy || []).length >= promo.maxUses) {
+      showToast('❌ This promo code has reached its usage limit.');
+      return;
+    }
+
+    const newBal = (db.balances[currentUser.id] || 0) + promo.amount;
+    const newTxn = {
+      id: Date.now(),
+      amount: promo.amount,
+      type: 'PROMO_CODE',
+      note: `Promo code redeemed: ${promo.code}`,
+      date: new Date().toLocaleString()
+    };
+    const updatedPromoCodes = db.promoCodes.map(p =>
+      p.id === promo.id ? { ...p, usedBy: [...(p.usedBy || []), currentUser.id] } : p
+    );
+    const newDb = {
+      ...db,
+      balances: { ...db.balances, [currentUser.id]: newBal },
+      transactions: {
+        ...db.transactions,
+        [currentUser.id]: [newTxn, ...(db.transactions[currentUser.id] || [])]
+      },
+      promoCodes: updatedPromoCodes
+    };
+    setDb(newDb);
+    sendAction('SAVE_MODERATOR_DB', { db: newDb });
+    setPromoCodeInput('');
+    showToast(`🎁 Promo code applied! ৳${promo.amount} added to your balance.`);
+  };
+
   // Only the Main (Full) Moderator is allowed to top-up a user's balance.
   const handleAdjustBalance = (userId: number, amount: number) => {
     if (moderatorRole !== 'full') {
@@ -285,6 +384,7 @@ export default function App() {
       setSubModeratorId(null);
       setShowModLogin(false);
       setActiveTab('moderator');
+      localStorage.setItem('romel_moderator_session', JSON.stringify({ role: 'full', subModeratorId: null }));
       showToast('⚡ Welcome Moderator! Full control unlocked.');
       return;
     }
@@ -297,6 +397,7 @@ export default function App() {
       setSubModeratorId(subMod.id);
       setShowModLogin(false);
       setActiveTab('moderator');
+      localStorage.setItem('romel_moderator_session', JSON.stringify({ role: 'sub', subModeratorId: subMod.id }));
       showToast(`⚡ Welcome ${subMod.name}! Sub-Moderator access unlocked.`);
     } else {
       showToast('❌ Incorrect Moderator Name or Secret Code');
@@ -1092,8 +1193,31 @@ export default function App() {
                   {currentUser ? (db.referrals[currentUser.id] || []).length : 0} Users
                 </div>
                 <div className="text-[11px] text-amber-400 mt-2">
-                  Earn ৳25 for every active invited friend
+                  Earn ৳{db.settings?.referralBonus ?? 25} for every active invited friend
                 </div>
+              </div>
+            </div>
+
+            {/* Promo Code Redemption */}
+            <div className="p-6 rounded-3xl bg-gradient-to-br from-fuchsia-500/10 to-purple-500/10 border border-fuchsia-500/30">
+              <h3 className="text-sm font-black text-slate-100 mb-1 flex items-center gap-2">
+                🎁 Have a Promo Code?
+              </h3>
+              <p className="text-xs text-slate-400 mb-3">Enter a promo code from the Moderator to instantly add bonus balance to your wallet.</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  placeholder="Enter promo code..."
+                  value={promoCodeInput}
+                  onChange={(e) => setPromoCodeInput(e.target.value)}
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-fuchsia-500 uppercase"
+                />
+                <button
+                  onClick={handleRedeemPromoCode}
+                  className="px-4 py-2.5 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-400 text-white font-black text-xs whitespace-nowrap"
+                >
+                  Redeem Code
+                </button>
               </div>
             </div>
 
@@ -1446,6 +1570,7 @@ export default function App() {
             onRejectWithdrawal={(id, reason) => sendAction('REJECT_WITHDRAWAL', { id, reason })}
             onBroadcastNotif={(notif) => sendAction('SEND_NOTIFICATION', notif)}
             onAdjustBalance={handleAdjustBalance}
+            onLogout={handleModeratorLogout}
             onToast={showToast}
           />
         )}
