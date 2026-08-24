@@ -22,7 +22,8 @@ import {
   UserPlus,
   Film,
   Smartphone,
-  Radio
+  Radio,
+  LogOut
 } from 'lucide-react';
 import type { AppDatabaseState, TaskItem, EarnItem, MovieItem, AppItem, NotificationItem } from '../types';
 
@@ -37,6 +38,7 @@ interface ModeratorViewProps {
   onRejectWithdrawal: (id: number, reason?: string) => void;
   onBroadcastNotif: (notif: { title: string; body: string; type?: 'info' | 'reward' | 'urgent'; targetUserId?: number | 'all' }) => void;
   onAdjustBalance: (userId: number, amount: number) => void;
+  onLogout: () => void;
   onToast: (msg: string) => void;
 }
 
@@ -51,10 +53,11 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
   onRejectWithdrawal,
   onBroadcastNotif,
   onAdjustBalance,
+  onLogout,
   onToast
 }) => {
   const isFull = role === 'full';
-  const [activeTab, setActiveTab] = useState<'submissions' | 'withdrawals' | 'tasks' | 'earns' | 'movies' | 'apps' | 'users' | 'broadcast' | 'settings' | 'support' | 'submods' | 'requests' | 'notices'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'withdrawals' | 'tasks' | 'earns' | 'movies' | 'apps' | 'users' | 'broadcast' | 'settings' | 'support' | 'submods' | 'requests' | 'notices' | 'promocodes'>('submissions');
 
   // Balance top-up form (Full Moderator only)
   const [balanceDrafts, setBalanceDrafts] = useState<Record<number, string>>({});
@@ -107,6 +110,12 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
   const [bannerText, setBannerText] = useState(db.settings?.broadcastBanner || '');
   const [paymentPhone, setPaymentPhone] = useState(db.settings?.promotionPaymentNumber || '01334788303');
   const [minWithdraw, setMinWithdraw] = useState(String(db.settings?.minWithdrawal || 700));
+  const [referralBonusInput, setReferralBonusInput] = useState(String(db.settings?.referralBonus ?? 25));
+
+  // Promo Code form (Full Moderator only)
+  const [promoCodeText, setPromoCodeText] = useState('');
+  const [promoAmount, setPromoAmount] = useState('');
+  const [promoMaxUses, setPromoMaxUses] = useState('1');
 
   // Handlers
   const handleAddTask = (e: React.FormEvent) => {
@@ -230,11 +239,59 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
         ...db.settings,
         broadcastBanner: bannerText,
         promotionPaymentNumber: paymentPhone,
-        minWithdrawal: Number(minWithdraw) || 700
+        minWithdrawal: Number(minWithdraw) || 700,
+        referralBonus: isFull ? (Number(referralBonusInput) || 0) : (db.settings?.referralBonus ?? 25)
       }
     };
     onUpdateDb(updated);
     onToast('⚙️ Platform settings saved successfully!');
+  };
+
+  const handleAddPromoCode = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isFull) {
+      onToast('❌ Only the Main Moderator can create promo codes.');
+      return;
+    }
+    const codeTrimmed = promoCodeText.trim().toUpperCase();
+    const amountNum = Number(promoAmount);
+    const maxUsesNum = Number(promoMaxUses);
+    if (!codeTrimmed || !amountNum || amountNum <= 0) {
+      onToast('❌ Enter a valid code and amount.');
+      return;
+    }
+    const alreadyExists = (db.promoCodes || []).some(p => p.code.trim().toUpperCase() === codeTrimmed);
+    if (alreadyExists) {
+      onToast('❌ This promo code already exists.');
+      return;
+    }
+    const newPromo = {
+      id: Date.now(),
+      code: codeTrimmed,
+      amount: amountNum,
+      maxUses: maxUsesNum > 0 ? maxUsesNum : 0,
+      usedBy: [],
+      active: true,
+      createdAt: new Date().toLocaleString()
+    };
+    onUpdateDb({ ...db, promoCodes: [newPromo, ...(db.promoCodes || [])] });
+    setPromoCodeText('');
+    setPromoAmount('');
+    setPromoMaxUses('1');
+    onToast(`✅ Promo code "${codeTrimmed}" created.`);
+  };
+
+  const handleTogglePromoCode = (id: number) => {
+    if (!isFull) return;
+    const updated = (db.promoCodes || []).map(p => (p.id === id ? { ...p, active: !p.active } : p));
+    onUpdateDb({ ...db, promoCodes: updated });
+  };
+
+  const handleDeletePromoCode = (id: number) => {
+    if (!isFull) return;
+    const updated = (db.promoCodes || []).filter(p => p.id !== id);
+    onUpdateDb({ ...db, promoCodes: updated });
+    onToast('🗑️ Promo code removed.');
   };
 
   const pendingSubmissions = db.submissions.filter(s => s.status === 'pending');
@@ -252,12 +309,20 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
             </div>
             <div>
               <h2 className="text-xl font-black text-slate-100">MODERATOR COMMAND CENTER</h2>
-              <p className="text-xs text-rose-300 font-semibold">Master Admin & Real-time Content Control</p>
+              <p className="text-xs text-rose-300 font-semibold">
+                {isFull ? 'Master Admin & Real-time Content Control' : 'Sub-Moderator Access'}
+              </p>
             </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
+          <button
+            onClick={onLogout}
+            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/50 text-slate-300 hover:text-rose-400 font-bold text-xs flex items-center gap-1.5 transition-all"
+          >
+            <LogOut className="w-3.5 h-3.5" /> Logout
+          </button>
           <div className="px-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-center">
             <div className="text-[10px] text-slate-400">Pending Proofs</div>
             <div className="text-sm font-black text-amber-400">{pendingSubmissions.length}</div>
@@ -287,6 +352,7 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
               { id: 'support', label: `Help Desk (${(db.support || []).filter(s => !s.reply).length})` },
               { id: 'users', label: `Users (${db.users.length})` },
               { id: 'submods', label: `Sub-Moderators (${(db.subModerators || []).length})` },
+              { id: 'promocodes', label: `Promo Codes (${(db.promoCodes || []).length})` },
               { id: 'notices', label: `Notices (${(db.notices || []).length})` },
               { id: 'broadcast', label: 'Broadcast Notif' },
               { id: 'settings', label: 'Global Settings' }
@@ -972,6 +1038,22 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
               />
             </div>
 
+            <div>
+              <label className="text-xs font-semibold text-slate-300 block mb-1">Referral Bonus Amount (৳ per invited friend)</label>
+              {isFull ? (
+                <input
+                  type="number"
+                  value={referralBonusInput}
+                  onChange={(e) => setReferralBonusInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200"
+                />
+              ) : (
+                <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-500">
+                  ৳{db.settings?.referralBonus ?? 25} <span className="italic">(Only the Main Moderator can change this)</span>
+                </div>
+              )}
+            </div>
+
             <button
               type="submit"
               className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-white text-slate-950 font-black text-xs"
@@ -1181,6 +1263,86 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
                         onUpdateDb({ ...db, subModerators: updated });
                         onToast('🗑️ Sub-Moderator removed.');
                       }}
+                      className="p-1.5 rounded-lg bg-rose-500/15 text-rose-400"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB: PROMO CODES (full moderator only — controls money added to the system) */}
+      {activeTab === 'promocodes' && isFull && (
+        <div className="space-y-6">
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <h3 className="text-sm font-bold text-slate-200 mb-3 flex items-center gap-2">
+              <Coins className="w-4 h-4 text-fuchsia-400" /> Create New Promo Code
+            </h3>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Users can redeem this code once from their Wallet tab to instantly receive bonus balance. Only the Main Moderator can create or remove promo codes.
+            </p>
+            <form onSubmit={handleAddPromoCode} className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                required
+                placeholder="CODE (e.g. WELCOME50)"
+                value={promoCodeText}
+                onChange={(e) => setPromoCodeText(e.target.value.toUpperCase())}
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 font-mono uppercase"
+              />
+              <input
+                type="number"
+                required
+                placeholder="৳ Amount"
+                value={promoAmount}
+                onChange={(e) => setPromoAmount(e.target.value)}
+                className="w-full sm:w-28 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+              />
+              <input
+                type="number"
+                placeholder="Max Uses (0 = unlimited)"
+                value={promoMaxUses}
+                onChange={(e) => setPromoMaxUses(e.target.value)}
+                className="w-full sm:w-40 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2.5 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-400 text-white font-black text-xs whitespace-nowrap"
+              >
+                Create Code
+              </button>
+            </form>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-bold text-slate-200">Existing Promo Codes ({(db.promoCodes || []).length})</h3>
+            {(db.promoCodes || []).length === 0 ? (
+              <p className="text-xs text-slate-500">No promo codes created yet.</p>
+            ) : (
+              (db.promoCodes || []).map((pc) => (
+                <div key={pc.id} className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-mono font-black text-fuchsia-300">{pc.code}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      ৳{pc.amount} • Used {(pc.usedBy || []).length}{pc.maxUses > 0 ? ` / ${pc.maxUses}` : ' (unlimited uses)'} • Created {pc.createdAt}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${pc.active ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                      {pc.active ? 'Active' : 'Disabled'}
+                    </span>
+                    <button
+                      onClick={() => handleTogglePromoCode(pc.id)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 text-[10px] font-bold"
+                    >
+                      {pc.active ? 'Disable' : 'Enable'}
+                    </button>
+                    <button
+                      onClick={() => handleDeletePromoCode(pc.id)}
                       className="p-1.5 rounded-lg bg-rose-500/15 text-rose-400"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
