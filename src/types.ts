@@ -96,6 +96,33 @@ export interface SupportMessage {
   userName?: string;
   message: string;
   reply?: string;
+  repliedBy?: string;
+  status?: 'open' | 'replied';
+  date: string;
+}
+
+export interface SubModerator {
+  id: number;
+  name: string;
+  pass: string;
+  createdAt: string;
+  active: boolean;
+}
+
+export interface ContentRequest {
+  id: number;
+  userId: number;
+  userName?: string;
+  type: 'movie' | 'app';
+  message: string;
+  status: 'pending' | 'fulfilled';
+  date: string;
+}
+
+export interface NoticeItem {
+  id: number;
+  title: string;
+  message: string;
   date: string;
 }
 
@@ -140,6 +167,9 @@ export interface AppDatabaseState {
   withdrawals: WithdrawalItem[];
   promotions: PromotionItem[];
   support: SupportMessage[];
+  subModerators: SubModerator[];
+  contentRequests: ContentRequest[];
+  notices: NoticeItem[];
   unlockedMovies: Record<number, number[]>;
   unlockedApps: Record<number, number[]>;
   referrals: Record<number, number[]>;

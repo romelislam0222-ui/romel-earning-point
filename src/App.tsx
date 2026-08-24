@@ -58,6 +58,9 @@ const initialAppState: AppDatabaseState = {
   withdrawals: [],
   promotions: [],
   support: [],
+  subModerators: [],
+  contentRequests: [],
+  notices: [],
   unlockedMovies: {},
   unlockedApps: {},
   referrals: {},
@@ -78,6 +81,9 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isModerator, setIsModerator] = useState(false);
   const [modPassword, setModPassword] = useState('');
+  const [modNameInput, setModNameInput] = useState('');
+  const [moderatorRole, setModeratorRole] = useState<'full' | 'sub' | null>(null);
+  const [subModeratorId, setSubModeratorId] = useState<number | null>(null);
   const [showModLogin, setShowModLogin] = useState(false);
   const [onlineCount, setOnlineCount] = useState<number>(1);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
@@ -108,6 +114,10 @@ export default function App() {
 
   // Support form
   const [supportMessage, setSupportMessage] = useState('');
+
+  // Content request forms
+  const [movieRequestText, setMovieRequestText] = useState('');
+  const [appRequestText, setAppRequestText] = useState('');
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -220,15 +230,49 @@ export default function App() {
     showToast('🎉 Account created! ৳50 Welcome bonus added.');
   };
 
+  const handleContentRequest = (type: 'movie' | 'app') => {
+    const text = type === 'movie' ? movieRequestText : appRequestText;
+    if (!text.trim() || !currentUser) return;
+    const newRequest = {
+      id: Date.now(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      type,
+      message: text.trim(),
+      status: 'pending' as const,
+      date: new Date().toLocaleString()
+    };
+    const updated = [newRequest, ...(db.contentRequests || [])];
+    setDb(prev => ({ ...prev, contentRequests: updated }));
+    sendAction('SAVE_MODERATOR_DB', { db: { contentRequests: updated } });
+    if (type === 'movie') setMovieRequestText('');
+    else setAppRequestText('');
+    showToast('✅ Your request has been sent to the Moderator team.');
+  };
+
   const handleModeratorLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (modPassword === '01334788303') {
       setIsModerator(true);
+      setModeratorRole('full');
+      setSubModeratorId(null);
       setShowModLogin(false);
       setActiveTab('moderator');
       showToast('⚡ Welcome Moderator! Full control unlocked.');
+      return;
+    }
+    const subMod = (db.subModerators || []).find(
+      sm => sm.active && sm.name.trim().toLowerCase() === modNameInput.trim().toLowerCase() && sm.pass === modPassword
+    );
+    if (subMod) {
+      setIsModerator(true);
+      setModeratorRole('sub');
+      setSubModeratorId(subMod.id);
+      setShowModLogin(false);
+      setActiveTab('moderator');
+      showToast(`⚡ Welcome ${subMod.name}! Sub-Moderator access unlocked.`);
     } else {
-      showToast('❌ Incorrect Moderator Secret Code');
+      showToast('❌ Incorrect Moderator Name or Secret Code');
     }
   };
 
@@ -627,6 +671,27 @@ export default function App() {
       {/* Main App Content Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
 
+        {/* NOTICE BOARD (visible to all users on every tab except moderator panel) */}
+        {activeTab !== 'moderator' && db.notices && db.notices.length > 0 && (
+          <div className="space-y-2">
+            {db.notices.slice(0, 3).map((notice) => (
+              <div
+                key={notice.id}
+                className="p-4 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-start gap-3"
+              >
+                <div className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400 shrink-0">
+                  <Radio className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-black text-sky-300">{notice.title}</div>
+                  <div className="text-xs text-slate-300 mt-0.5 whitespace-pre-wrap break-words">{notice.message}</div>
+                  <div className="text-[10px] text-slate-500 mt-1">{notice.date}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* TAB 1: MICRO TASKS */}
         {activeTab === 'tasks' && (
           <div className="space-y-6">
@@ -862,6 +927,29 @@ export default function App() {
                 );
               })}
             </div>
+
+            {/* Request a Movie */}
+            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800/80">
+              <h3 className="text-sm font-bold text-slate-100 mb-1 flex items-center gap-2">
+                <Film className="w-4 h-4 text-rose-400" /> Can't find your movie?
+              </h3>
+              <p className="text-xs text-slate-400 mb-3">Tell us which movie or series you want. Your request goes straight to the Moderator team.</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  placeholder="e.g. Dune Part 3 (2026) HD..."
+                  value={movieRequestText}
+                  onChange={(e) => setMovieRequestText(e.target.value)}
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-rose-500"
+                />
+                <button
+                  onClick={() => handleContentRequest('movie')}
+                  className="px-4 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-white font-black text-xs flex items-center justify-center gap-1.5 whitespace-nowrap"
+                >
+                  <Send className="w-3.5 h-3.5" /> Send Request
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -920,6 +1008,29 @@ export default function App() {
                   </div>
                 );
               })}
+            </div>
+
+            {/* Request an App */}
+            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800/80">
+              <h3 className="text-sm font-bold text-slate-100 mb-1 flex items-center gap-2">
+                <Smartphone className="w-4 h-4 text-indigo-400" /> Looking for a specific app?
+              </h3>
+              <p className="text-xs text-slate-400 mb-3">Tell us which app or tool you need unlocked. Your request goes straight to the Moderator team.</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  placeholder="e.g. CapCut Pro Unlocked..."
+                  value={appRequestText}
+                  onChange={(e) => setAppRequestText(e.target.value)}
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+                <button
+                  onClick={() => handleContentRequest('app')}
+                  className="px-4 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-black text-xs flex items-center justify-center gap-1.5 whitespace-nowrap"
+                >
+                  <Send className="w-3.5 h-3.5" /> Send Request
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1259,6 +1370,36 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* My Support Tickets & Replies */}
+            {currentUser && (
+              <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800">
+                <h3 className="text-base font-black text-slate-100 mb-4">My Support Tickets</h3>
+                <div className="space-y-3">
+                  {db.support.filter(s => s.userId === currentUser.id).length === 0 && (
+                    <p className="text-xs text-slate-500">You haven't sent any support tickets yet.</p>
+                  )}
+                  {db.support
+                    .filter(s => s.userId === currentUser.id)
+                    .map((ticket) => (
+                      <div key={ticket.id} className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
+                        <div className="text-xs text-slate-200">{ticket.message}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">{ticket.date}</div>
+                        {ticket.reply ? (
+                          <div className="mt-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                            <div className="text-[10px] font-black text-emerald-400 mb-1">
+                              Moderator Reply{ticket.repliedBy ? ` — ${ticket.repliedBy}` : ''}
+                            </div>
+                            <div className="text-xs text-slate-200">{ticket.reply}</div>
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-[10px] text-amber-400 font-semibold">⏳ Waiting for moderator reply...</div>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1266,6 +1407,8 @@ export default function App() {
         {activeTab === 'moderator' && isModerator && (
           <ModeratorView
             db={db}
+            role={moderatorRole || 'full'}
+            subModeratorId={subModeratorId}
             onUpdateDb={(newDb) => {
               setDb(newDb);
               sendAction('SAVE_MODERATOR_DB', { db: newDb });
@@ -1386,11 +1529,20 @@ export default function App() {
               </div>
               <div>
                 <h3 className="text-sm font-bold text-slate-100">Moderator Access</h3>
-                <p className="text-[11px] text-slate-400">Enter Admin Secret Passcode</p>
+                <p className="text-[11px] text-slate-400">Admin or Sub-Moderator Login</p>
               </div>
             </div>
 
-            <form onSubmit={handleModeratorLogin} className="space-y-4">
+            <form onSubmit={handleModeratorLogin} className="space-y-3">
+              <div>
+                <input
+                  type="text"
+                  placeholder="Sub-Moderator Name (leave blank for Admin)"
+                  value={modNameInput}
+                  onChange={(e) => setModNameInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                />
+              </div>
               <div>
                 <input
                   type="password"
