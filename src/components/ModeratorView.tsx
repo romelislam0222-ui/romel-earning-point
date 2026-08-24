@@ -17,12 +17,19 @@ import {
   RefreshCw,
   Search,
   ExternalLink,
-  Edit2
+  Edit2,
+  MessageSquare,
+  UserPlus,
+  Film,
+  Smartphone,
+  Radio
 } from 'lucide-react';
 import type { AppDatabaseState, TaskItem, EarnItem, MovieItem, AppItem, NotificationItem } from '../types';
 
 interface ModeratorViewProps {
   db: AppDatabaseState;
+  role: 'full' | 'sub';
+  subModeratorId?: number | null;
   onUpdateDb: (newDb: AppDatabaseState) => void;
   onApproveProof: (id: number) => void;
   onRejectProof: (id: number, reason?: string) => void;
@@ -34,6 +41,8 @@ interface ModeratorViewProps {
 
 export const ModeratorView: React.FC<ModeratorViewProps> = ({
   db,
+  role,
+  subModeratorId,
   onUpdateDb,
   onApproveProof,
   onRejectProof,
@@ -42,7 +51,20 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
   onBroadcastNotif,
   onToast
 }) => {
-  const [activeTab, setActiveTab] = useState<'submissions' | 'withdrawals' | 'tasks' | 'earns' | 'movies' | 'apps' | 'users' | 'broadcast' | 'settings'>('submissions');
+  const isFull = role === 'full';
+  const [activeTab, setActiveTab] = useState<'submissions' | 'withdrawals' | 'tasks' | 'earns' | 'movies' | 'apps' | 'users' | 'broadcast' | 'settings' | 'support' | 'submods' | 'requests' | 'notices'>(isFull ? 'submissions' : 'tasks');
+
+  // Support reply form
+  const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
+
+  // Sub-moderator form
+  const [subModName, setSubModName] = useState('');
+  const [subModPass, setSubModPass] = useState('');
+
+  // Notice form
+  const [noticeTitle, setNoticeTitle] = useState('');
+  const [noticeMessage, setNoticeMessage] = useState('');
+
 
   // New Task Form
   const [taskTitle, setTaskTitle] = useState('');
@@ -248,17 +270,28 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
 
       {/* Moderator Sub-Tabs */}
       <div className="flex gap-1.5 overflow-x-auto pb-2 border-b border-slate-800">
-        {[
-          { id: 'submissions', label: `Task Proofs (${pendingSubmissions.length})` },
-          { id: 'withdrawals', label: `Withdrawals (${pendingWithdrawals.length})` },
-          { id: 'tasks', label: `Tasks (${db.tasks.length})` },
-          { id: 'earns', label: `Daily Earns (${db.earns.length})` },
-          { id: 'movies', label: `Movies (${db.movies.length})` },
-          { id: 'apps', label: `Apps (${db.apps.length})` },
-          { id: 'users', label: `Users (${db.users.length})` },
-          { id: 'broadcast', label: 'Broadcast Notif' },
-          { id: 'settings', label: 'Global Settings' }
-        ].map((t) => (
+        {(isFull
+          ? [
+              { id: 'submissions', label: `Task Proofs (${pendingSubmissions.length})` },
+              { id: 'withdrawals', label: `Withdrawals (${pendingWithdrawals.length})` },
+              { id: 'tasks', label: `Tasks (${db.tasks.length})` },
+              { id: 'earns', label: `Daily Earns (${db.earns.length})` },
+              { id: 'movies', label: `Movies (${db.movies.length})` },
+              { id: 'apps', label: `Apps (${db.apps.length})` },
+              { id: 'requests', label: `Requests (${(db.contentRequests || []).filter(r => r.status === 'pending').length})` },
+              { id: 'support', label: `Help Desk (${(db.support || []).filter(s => !s.reply).length})` },
+              { id: 'users', label: `Users (${db.users.length})` },
+              { id: 'submods', label: `Sub-Moderators (${(db.subModerators || []).length})` },
+              { id: 'notices', label: `Notices (${(db.notices || []).length})` },
+              { id: 'broadcast', label: 'Broadcast Notif' },
+              { id: 'settings', label: 'Global Settings' }
+            ]
+          : [
+              { id: 'tasks', label: `Tasks (${db.tasks.length})` },
+              { id: 'support', label: `Help Desk (${(db.support || []).filter(s => !s.reply).length})` },
+              { id: 'requests', label: `Requests (${(db.contentRequests || []).filter(r => r.status === 'pending').length})` }
+            ]
+        ).map((t) => (
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id as any)}
@@ -897,6 +930,297 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
               Save Global Configuration
             </button>
           </form>
+        </div>
+      )}
+
+      {/* TAB: HELP DESK / SUPPORT TICKETS */}
+      {activeTab === 'support' && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-blue-400" /> User Support Tickets
+          </h3>
+          {(db.support || []).length === 0 ? (
+            <p className="text-xs text-slate-500">No support tickets yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {db.support.map((ticket) => (
+                <div key={ticket.id} className="p-4 rounded-2xl bg-slate-900 border border-slate-800">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-slate-100">{ticket.userName || `User #${ticket.userId}`}</span>
+                    <span className="text-[10px] text-slate-500">{ticket.date}</span>
+                  </div>
+                  <p className="text-xs text-slate-300">{ticket.message}</p>
+
+                  {ticket.reply && (
+                    <div className="mt-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                      <div className="text-[10px] font-black text-emerald-400 mb-0.5">
+                        Replied {ticket.repliedBy ? `by ${ticket.repliedBy}` : ''}
+                      </div>
+                      <div className="text-xs text-slate-200">{ticket.reply}</div>
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      type="text"
+                      placeholder={ticket.reply ? 'Update reply...' : 'Write a reply...'}
+                      value={replyDrafts[ticket.id] ?? ''}
+                      onChange={(e) => setReplyDrafts(prev => ({ ...prev, [ticket.id]: e.target.value }))}
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200"
+                    />
+                    <button
+                      onClick={() => {
+                        const replyText = (replyDrafts[ticket.id] ?? '').trim();
+                        if (!replyText) return;
+                        const updatedSupport = db.support.map(s =>
+                          s.id === ticket.id
+                            ? { ...s, reply: replyText, repliedBy: isFull ? 'Moderator' : 'Sub-Moderator', status: 'replied' as const }
+                            : s
+                        );
+                        onUpdateDb({ ...db, support: updatedSupport });
+                        setReplyDrafts(prev => ({ ...prev, [ticket.id]: '' }));
+                        onToast('✅ Reply sent to user.');
+                      }}
+                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Send className="w-3.5 h-3.5" /> Reply
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: CONTENT REQUESTS (movies/apps users asked for) */}
+      {activeTab === 'requests' && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+            <Film className="w-4 h-4 text-purple-400" /> Movie & App Requests
+          </h3>
+          {(db.contentRequests || []).length === 0 ? (
+            <p className="text-xs text-slate-500">No requests yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {(db.contentRequests || []).map((req) => (
+                <div key={req.id} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      {req.type === 'movie' ? (
+                        <Film className="w-3.5 h-3.5 text-rose-400" />
+                      ) : (
+                        <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
+                      )}
+                      <span className="text-xs font-bold text-slate-100">{req.userName || `User #${req.userId}`}</span>
+                      <span className="text-[10px] text-slate-500">{req.date}</span>
+                    </div>
+                    <p className="text-xs text-slate-300">{req.message}</p>
+                    <span
+                      className={`inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        req.status === 'fulfilled'
+                          ? 'bg-emerald-500/15 text-emerald-400'
+                          : 'bg-amber-500/15 text-amber-400'
+                      }`}
+                    >
+                      {req.status === 'fulfilled' ? 'Fulfilled' : 'Pending'}
+                    </span>
+                  </div>
+                  {req.status !== 'fulfilled' && (
+                    <button
+                      onClick={() => {
+                        const updated = (db.contentRequests || []).map(r =>
+                          r.id === req.id ? { ...r, status: 'fulfilled' as const } : r
+                        );
+                        onUpdateDb({ ...db, contentRequests: updated });
+                        onToast('✅ Marked as fulfilled.');
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] whitespace-nowrap"
+                    >
+                      Mark Done
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: SUB-MODERATORS (full moderator only) */}
+      {activeTab === 'submods' && isFull && (
+        <div className="space-y-6">
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <h3 className="text-sm font-bold text-slate-200 mb-3 flex items-center gap-2">
+              <UserPlus className="w-4 h-4 text-emerald-400" /> Add New Sub-Moderator
+            </h3>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Sub-Moderators can only manage Tasks, reply to Help Desk messages, and view content requests. They cannot access withdrawals, users, settings, or broadcast.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!subModName.trim() || !subModPass.trim()) return;
+                const newSubMod = {
+                  id: Date.now(),
+                  name: subModName.trim(),
+                  pass: subModPass.trim(),
+                  createdAt: new Date().toLocaleString(),
+                  active: true
+                };
+                onUpdateDb({ ...db, subModerators: [...(db.subModerators || []), newSubMod] });
+                setSubModName('');
+                setSubModPass('');
+                onToast('✅ Sub-Moderator added.');
+              }}
+              className="flex flex-col sm:flex-row gap-2"
+            >
+              <input
+                type="text"
+                required
+                placeholder="Sub-Moderator Name"
+                value={subModName}
+                onChange={(e) => setSubModName(e.target.value)}
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+              />
+              <input
+                type="text"
+                required
+                placeholder="Secret Code / Password"
+                value={subModPass}
+                onChange={(e) => setSubModPass(e.target.value)}
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 font-mono"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs whitespace-nowrap"
+              >
+                Add Sub-Moderator
+              </button>
+            </form>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-bold text-slate-200">Current Sub-Moderators ({(db.subModerators || []).length})</h3>
+            {(db.subModerators || []).length === 0 ? (
+              <p className="text-xs text-slate-500">No sub-moderators added yet.</p>
+            ) : (
+              (db.subModerators || []).map((sm) => (
+                <div key={sm.id} className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-slate-100">{sm.name}</div>
+                    <div className="text-[10px] text-slate-500">Added {sm.createdAt}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sm.active ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                      {sm.active ? 'Active' : 'Disabled'}
+                    </span>
+                    <button
+                      onClick={() => {
+                        const updated = (db.subModerators || []).map(x =>
+                          x.id === sm.id ? { ...x, active: !x.active } : x
+                        );
+                        onUpdateDb({ ...db, subModerators: updated });
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 text-[10px] font-bold"
+                    >
+                      {sm.active ? 'Disable' : 'Enable'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const updated = (db.subModerators || []).filter(x => x.id !== sm.id);
+                        onUpdateDb({ ...db, subModerators: updated });
+                        onToast('🗑️ Sub-Moderator removed.');
+                      }}
+                      className="p-1.5 rounded-lg bg-rose-500/15 text-rose-400"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB: DASHBOARD NOTICES (full moderator only) */}
+      {activeTab === 'notices' && isFull && (
+        <div className="space-y-6">
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <h3 className="text-sm font-bold text-slate-200 mb-3 flex items-center gap-2">
+              <Radio className="w-4 h-4 text-sky-400" /> Post a Dashboard Notice
+            </h3>
+            <p className="text-[11px] text-slate-500 mb-3">
+              This notice will show on every user's dashboard, on top of every tab.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!noticeTitle.trim() || !noticeMessage.trim()) return;
+                const newNotice = {
+                  id: Date.now(),
+                  title: noticeTitle.trim(),
+                  message: noticeMessage.trim(),
+                  date: new Date().toLocaleString()
+                };
+                onUpdateDb({ ...db, notices: [newNotice, ...(db.notices || [])] });
+                setNoticeTitle('');
+                setNoticeMessage('');
+                onToast('📢 Notice posted to all users.');
+              }}
+              className="space-y-3"
+            >
+              <input
+                type="text"
+                required
+                placeholder="Notice Title"
+                value={noticeTitle}
+                onChange={(e) => setNoticeTitle(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+              />
+              <textarea
+                required
+                rows={3}
+                placeholder="Notice message..."
+                value={noticeMessage}
+                onChange={(e) => setNoticeMessage(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200"
+              />
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs"
+              >
+                Post Notice
+              </button>
+            </form>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-bold text-slate-200">Posted Notices ({(db.notices || []).length})</h3>
+            {(db.notices || []).length === 0 ? (
+              <p className="text-xs text-slate-500">No notices posted yet.</p>
+            ) : (
+              (db.notices || []).map((n) => (
+                <div key={n.id} className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-bold text-slate-100">{n.title}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">{n.message}</div>
+                    <div className="text-[10px] text-slate-500 mt-1">{n.date}</div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const updated = (db.notices || []).filter(x => x.id !== n.id);
+                      onUpdateDb({ ...db, notices: updated });
+                    }}
+                    className="p-1.5 rounded-lg bg-rose-500/15 text-rose-400 shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 
