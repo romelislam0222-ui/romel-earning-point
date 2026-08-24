@@ -3,7 +3,6 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 // @ts-ignore
 import archiverPkg from 'archiver';
 const archiver = archiverPkg;
@@ -140,6 +139,9 @@ const initialDb: AppDatabaseState = {
   withdrawals: [],
   promotions: [],
   support: [],
+  subModerators: [],
+  contentRequests: [],
+  notices: [],
   unlockedMovies: {},
   unlockedApps: {},
   referrals: {},
