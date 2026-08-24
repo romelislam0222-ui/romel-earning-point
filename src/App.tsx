@@ -250,6 +250,33 @@ export default function App() {
     showToast('✅ Your request has been sent to the Moderator team.');
   };
 
+  // Only the Main (Full) Moderator is allowed to top-up a user's balance.
+  const handleAdjustBalance = (userId: number, amount: number) => {
+    if (moderatorRole !== 'full') {
+      showToast('❌ Only the Main Moderator can add balance.');
+      return;
+    }
+    const currentBal = db.balances[userId] || 0;
+    const newBal = currentBal + amount;
+    const newTxn = {
+      id: Date.now(),
+      amount,
+      type: 'MODERATOR_TOPUP',
+      note: 'Balance added by Main Moderator',
+      date: new Date().toLocaleString()
+    };
+    const newDb = {
+      ...db,
+      balances: { ...db.balances, [userId]: newBal },
+      transactions: {
+        ...db.transactions,
+        [userId]: [newTxn, ...(db.transactions[userId] || [])]
+      }
+    };
+    setDb(newDb);
+    sendAction('SAVE_MODERATOR_DB', { db: newDb });
+  };
+
   const handleModeratorLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (modPassword === '01334788303') {
@@ -1418,6 +1445,7 @@ export default function App() {
             onVerifyWithdrawal={(id) => sendAction('VERIFY_WITHDRAWAL', { id })}
             onRejectWithdrawal={(id, reason) => sendAction('REJECT_WITHDRAWAL', { id, reason })}
             onBroadcastNotif={(notif) => sendAction('SEND_NOTIFICATION', notif)}
+            onAdjustBalance={handleAdjustBalance}
             onToast={showToast}
           />
         )}
