@@ -25,7 +25,10 @@ import {
   Search,
   Lock,
   Unlock,
-  AlertCircle
+  AlertCircle,
+  UserCheck,
+  Copy,
+  XCircle
 } from 'lucide-react';
 import type { 
   AppDatabaseState, 
@@ -62,6 +65,9 @@ const initialAppState: AppDatabaseState = {
   contentRequests: [],
   notices: [],
   promoCodes: [],
+  pendingRegistrations: [],
+  supportGroups: [],
+  season2Tasks: [],
   unlockedMovies: {},
   unlockedApps: {},
   referrals: {},
@@ -73,14 +79,26 @@ const initialAppState: AppDatabaseState = {
     bannerActive: true,
     promotionPaymentNumber: '01334788303',
     minWithdrawal: 700,
-    referralBonus: 25
+    referralBonus: 25,
+    registrationFeeEnabled: true,
+    registrationPaymentNumber: '01334788303',
+    registrationFeeBeforeDeadline: 100,
+    registrationFeeAfterDeadline: 150,
+    registrationDeadline: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+    season2ComingSoon: true,
+    apkDownloadUrl: ''
   }
 };
 
 export default function App() {
   const [db, setDb] = useState<AppDatabaseState>(initialAppState);
-  const [activeTab, setActiveTab] = useState<'tasks' | 'earn' | 'movies' | 'apps' | 'wallet' | 'promotion' | 'support' | 'moderator'>('tasks');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'earn' | 'movies' | 'apps' | 'wallet' | 'promotion' | 'support' | 'moderator' | 'updates' | 'season2' | 'supportgroups'>('tasks');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showLoginForm, setShowLoginForm] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPass, setLoginPass] = useState('');
+  const [pendingRegistrationId, setPendingRegistrationId] = useState<number | null>(null);
   const [isModerator, setIsModerator] = useState(false);
   const [modPassword, setModPassword] = useState('');
   const [modNameInput, setModNameInput] = useState('');
@@ -170,6 +188,11 @@ export default function App() {
           if (n.targetUserId === 'all' || n.targetUserId === currentUser?.id) {
             showToast(`🔔 ${n.title}: ${n.body}`);
           }
+        } else if (msg.type === 'REGISTRATION_SUBMITTED') {
+          const id = msg.payload.id;
+          setPendingRegistrationId(id);
+          localStorage.setItem('romel_pending_registration', String(id));
+          setShowOnboarding(false);
         }
       } catch (err) {
         console.error('WS Parse Error:', err);
@@ -188,12 +211,20 @@ export default function App() {
   // Handle local user session
   useEffect(() => {
     const savedUser = localStorage.getItem('romel_user');
+    const savedPendingReg = localStorage.getItem('romel_pending_registration');
+
     if (savedUser) {
       try {
         setCurrentUser(JSON.parse(savedUser));
       } catch (e) {
-        setShowOnboarding(true);
+        if (savedPendingReg) {
+          setPendingRegistrationId(Number(savedPendingReg));
+        } else {
+          setShowOnboarding(true);
+        }
       }
+    } else if (savedPendingReg) {
+      setPendingRegistrationId(Number(savedPendingReg));
     } else {
       setShowOnboarding(true);
     }
@@ -231,6 +262,35 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db.subModerators]);
 
+  // Ask for browser notification permission once the Moderator opens the panel,
+  // so they can get an instant alert when a new registration payment comes in.
+  useEffect(() => {
+    if (isModerator && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, [isModerator]);
+
+  // Fire a native browser notification to the Moderator whenever a brand-new
+  // pending registration arrives (best-effort — only works while this tab/app is open).
+  const prevPendingRegCount = useRef<number>(0);
+  useEffect(() => {
+    const pendingCount = (db.pendingRegistrations || []).filter(p => p.status === 'pending').length;
+    if (isModerator && pendingCount > prevPendingRegCount.current) {
+      const latest = (db.pendingRegistrations || []).find(p => p.status === 'pending');
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        try {
+          new Notification('💰 New Registration Payment!', {
+            body: latest ? `${latest.name} sent ৳${latest.amountPaid} — verify their TrxID now.` : 'A new registration is waiting for approval.'
+          });
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      showToast('🔔 New registration payment received — check the Registrations tab!');
+    }
+    prevPendingRegCount.current = pendingCount;
+  }, [db.pendingRegistrations, isModerator]);
+
   const handleModeratorLogout = () => {
     setIsModerator(false);
     setModeratorRole(null);
@@ -238,6 +298,31 @@ export default function App() {
     setActiveTab('tasks');
     localStorage.removeItem('romel_moderator_session');
     showToast('👋 Logged out of Moderator panel.');
+  };
+
+  // Watch the tracked pending registration for approval / rejection.
+  useEffect(() => {
+    if (pendingRegistrationId == null) return;
+    const entry = (db.pendingRegistrations || []).find(p => p.id === pendingRegistrationId);
+    if (!entry) return;
+
+    if (entry.status === 'approved') {
+      const matchedUser = db.users.find(u => u.email.toLowerCase() === entry.email.toLowerCase());
+      if (matchedUser) {
+        setCurrentUser(matchedUser);
+        localStorage.setItem('romel_user', JSON.stringify(matchedUser));
+        localStorage.removeItem('romel_pending_registration');
+        setPendingRegistrationId(null);
+        showToast('✅ Payment verified! Welcome to ROMEL EARNING POINT 🎉');
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db.pendingRegistrations, db.users]);
+
+  const handleCancelPendingRegistration = () => {
+    setPendingRegistrationId(null);
+    localStorage.removeItem('romel_pending_registration');
+    setShowOnboarding(true);
   };
 
   const sendAction = (action: string, data: any) => {
@@ -259,21 +344,74 @@ export default function App() {
     }
   };
 
-  const handleOnboardingComplete = (userData: { name: string; email: string; pass: string; country: string; language: string; referralId?: string }) => {
-    sendAction('CREATE_USER', userData);
-    const mockUser: User = {
-      id: Date.now(),
-      name: userData.name,
-      email: userData.email,
-      pass: userData.pass,
-      country: userData.country,
-      language: userData.language,
-      createdAt: new Date().toLocaleString()
-    };
-    setCurrentUser(mockUser);
-    localStorage.setItem('romel_user', JSON.stringify(mockUser));
+  const handleOnboardingComplete = (userData: {
+    name: string;
+    email: string;
+    pass: string;
+    country: string;
+    language: string;
+    referralId?: string;
+    bkashNumber?: string;
+    trxId?: string;
+    amountPaid?: number;
+    bypassCode?: string;
+  }) => {
+    // Prevent duplicate signups with an email already registered.
+    const emailTaken = db.users.some(u => u.email.toLowerCase() === userData.email.trim().toLowerCase());
+    if (emailTaken) {
+      showToast('❌ This email is already registered. Please log in instead.');
+      return;
+    }
+
+    sendAction('SUBMIT_REGISTRATION', {
+      ...userData,
+      email: userData.email.trim(),
+      bkashNumber: (userData.bkashNumber || '').trim(),
+      trxId: (userData.trxId || '').trim(),
+      bypassCode: (userData.bypassCode || '').trim()
+    });
+
     setShowOnboarding(false);
-    showToast('🎉 Account created! ৳50 Welcome bonus added.');
+    showToast('📨 Registration submitted! Waiting for verification...');
+  };
+
+  const handleLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const emailTrimmed = loginEmail.trim().toLowerCase();
+    const matched = db.users.find(
+      u => u.email.toLowerCase() === emailTrimmed && u.pass === loginPass
+    );
+    if (!matched) {
+      showToast('❌ Incorrect email or password.');
+      return;
+    }
+    setCurrentUser(matched);
+    localStorage.setItem('romel_user', JSON.stringify(matched));
+    setShowLoginForm(false);
+    setShowOnboarding(false);
+    setLoginEmail('');
+    setLoginPass('');
+    showToast(`👋 Welcome back, ${matched.name}!`);
+  };
+
+  const handleUserLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('romel_user');
+    setShowProfileMenu(false);
+    setShowOnboarding(true);
+    showToast('👋 You have been logged out.');
+  };
+
+  // Registration fee live status, based on the moderator-configured deadline.
+  const getRegistrationFeeStatus = () => {
+    const deadlineStr = db.settings?.registrationDeadline;
+    const before = db.settings?.registrationFeeBeforeDeadline ?? 100;
+    const after = db.settings?.registrationFeeAfterDeadline ?? 150;
+    if (!deadlineStr) return { amount: after, msLeft: 0, expired: true };
+    const deadline = new Date(deadlineStr).getTime();
+    const msLeft = deadline - Date.now();
+    if (msLeft <= 0) return { amount: after, msLeft: 0, expired: true };
+    return { amount: before, msLeft, expired: false };
   };
 
   const handleContentRequest = (type: 'movie' | 'app') => {
@@ -376,6 +514,39 @@ export default function App() {
     sendAction('SAVE_MODERATOR_DB', { db: newDb });
   };
 
+  // Bulk add balance to every registered user at once (Main Moderator only)
+  const handleBulkAdjustBalance = (amount: number) => {
+    if (moderatorRole !== 'full') {
+      showToast('❌ Only the Main Moderator can add balance.');
+      return;
+    }
+    const nowStr = new Date().toLocaleString();
+    const newBalances = { ...db.balances };
+    const newTransactions = { ...db.transactions };
+    db.users.forEach((u) => {
+      newBalances[u.id] = (newBalances[u.id] || 0) + amount;
+      const newTxn = {
+        id: Date.now() + u.id,
+        amount,
+        type: 'MODERATOR_BULK_TOPUP',
+        note: 'Bulk balance added by Main Moderator',
+        date: nowStr
+      };
+      newTransactions[u.id] = [newTxn, ...(newTransactions[u.id] || [])];
+    });
+    const newDb = { ...db, balances: newBalances, transactions: newTransactions };
+    setDb(newDb);
+    sendAction('SAVE_MODERATOR_DB', { db: newDb });
+  };
+
+  const handleApproveRegistration = (id: number) => {
+    sendAction('APPROVE_REGISTRATION', { id });
+  };
+
+  const handleRejectRegistration = (id: number, reason?: string) => {
+    sendAction('REJECT_REGISTRATION', { id, reason });
+  };
+
   const handleModeratorLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (modPassword === '01334788303') {
@@ -433,6 +604,16 @@ export default function App() {
   const handleEarnProofSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !selectedEarnForProof || !proofInput) return;
+
+    const todaysAttempts = userSubmissions.filter(
+      s => s.kind === 'earn' &&
+        s.earnId === selectedEarnForProof.id &&
+        new Date(s.date).toDateString() === new Date().toDateString()
+    ).length;
+    if (todaysAttempts >= 2) {
+      showToast('❌ You can only complete this task up to 2 times per day. Try again tomorrow!');
+      return;
+    }
 
     sendAction('SUBMIT_TASK_PROOF', {
       userId: currentUser.id,
@@ -620,6 +801,9 @@ export default function App() {
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">
                     VIP HUB
                   </span>
+                  <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/30">
+                    SEASON 1
+                  </span>
                 </h1>
               </div>
               <div className="flex items-center gap-2 text-[11px] text-slate-400">
@@ -636,15 +820,21 @@ export default function App() {
           {/* Quick Actions & User Bar */}
           <div className="flex items-center gap-2 sm:gap-3">
             
-            {/* Download Full Source ZIP */}
+            {/* Download App (APK) */}
             <a
-              href="/api/download-zip"
-              download="romel-earning-point-source.zip"
-              onClick={() => showToast('Downloading full ZIP source file... 📦')}
+              href={db.settings?.apkDownloadUrl || '#'}
+              onClick={(e) => {
+                if (!db.settings?.apkDownloadUrl) {
+                  e.preventDefault();
+                  showToast('📦 APK link not set yet. Please check back soon!');
+                } else {
+                  showToast('Downloading ROMEL EARNING POINT app... 📲');
+                }
+              }}
               className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-xs shadow-lg shadow-purple-950/60 border border-purple-400/40 flex items-center gap-1.5 cursor-pointer transition-all hover:scale-105"
             >
-              <span>📦</span>
-              <span className="hidden sm:inline">Download ZIP Source</span>
+              <span>📲</span>
+              <span className="hidden sm:inline">Download App</span>
             </a>
 
             {/* Notification Bell */}
@@ -675,6 +865,56 @@ export default function App() {
                   <Wallet className="w-3.5 h-3.5" />
                 </div>
               </div>
+            )}
+
+            {/* Profile Icon / Login Button */}
+            {currentUser ? (
+              <div className="relative">
+                <button
+                  onClick={() => setShowProfileMenu(prev => !prev)}
+                  className="w-9 h-9 rounded-full bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 border-2 border-slate-800"
+                  title="Profile"
+                >
+                  {currentUser.name?.charAt(0).toUpperCase() || 'U'}
+                </button>
+                {showProfileMenu && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowProfileMenu(false)} />
+                    <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl z-50 overflow-hidden">
+                      <div className="p-3.5 border-b border-slate-800">
+                        <div className="text-xs font-black text-slate-100 truncate">{currentUser.name}</div>
+                        <div className="text-[10px] text-slate-500 truncate">{currentUser.email}</div>
+                      </div>
+                      <button
+                        onClick={() => { setActiveTab('wallet'); setShowProfileMenu(false); }}
+                        className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs text-slate-300 hover:bg-slate-800 transition-colors"
+                      >
+                        <Wallet className="w-3.5 h-3.5" /> My Wallet
+                      </button>
+                      <button
+                        onClick={() => { setActiveTab('support'); setShowProfileMenu(false); }}
+                        className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs text-slate-300 hover:bg-slate-800 transition-colors"
+                      >
+                        <HelpCircle className="w-3.5 h-3.5" /> Help & Support
+                      </button>
+                      <button
+                        onClick={handleUserLogout}
+                        className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors border-t border-slate-800"
+                      >
+                        <LogOut className="w-3.5 h-3.5" /> Logout
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => { setShowLoginForm(true); setShowOnboarding(false); }}
+                className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/40 text-slate-300 hover:text-amber-400 font-semibold text-xs flex items-center gap-1.5 transition-colors"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Login</span>
+              </button>
             )}
 
             {/* Moderator Login / Panel Button */}
@@ -779,6 +1019,39 @@ export default function App() {
             }`}
           >
             <HelpCircle className="w-3.5 h-3.5" /> Help & Support
+          </button>
+
+          <button
+            onClick={() => setActiveTab('supportgroups')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+              activeTab === 'supportgroups'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" /> Support Group
+          </button>
+
+          <button
+            onClick={() => setActiveTab('updates')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+              activeTab === 'updates'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Radio className="w-3.5 h-3.5" /> Updates
+          </button>
+
+          <button
+            onClick={() => setActiveTab('season2')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+              activeTab === 'season2'
+                ? 'bg-fuchsia-500 text-white shadow-md shadow-fuchsia-500/30'
+                : 'text-fuchsia-400 hover:text-fuchsia-300 hover:bg-fuchsia-950/40'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" /> Season 2
           </button>
 
           {isModerator && (
@@ -1198,6 +1471,33 @@ export default function App() {
               </div>
             </div>
 
+            {/* Share Referral Link */}
+            {currentUser && (
+              <div className="p-6 rounded-3xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/30">
+                <h3 className="text-sm font-black text-slate-100 mb-1 flex items-center gap-2">
+                  <Share2 className="w-4 h-4 text-amber-400" /> Share Your Referral Link
+                </h3>
+                <p className="text-xs text-slate-400 mb-3">
+                  Invite friends with this link — when they register, you earn ৳{db.settings?.referralBonus ?? 25} instantly.
+                </p>
+                <div className="flex items-center justify-between bg-slate-950 rounded-xl px-3 py-2.5 border border-slate-800 gap-2">
+                  <span className="text-[11px] font-mono text-slate-300 truncate">
+                    {typeof window !== 'undefined' ? window.location.origin : ''}?ref={currentUser.id}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const link = `${window.location.origin}?ref=${currentUser.id}`;
+                      navigator.clipboard?.writeText(link).then(() => showToast('🔗 Referral link copied!')).catch(() => {});
+                    }}
+                    className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black flex items-center gap-1"
+                  >
+                    <Copy className="w-3 h-3" /> Copy
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Promo Code Redemption */}
             <div className="p-6 rounded-3xl bg-gradient-to-br from-fuchsia-500/10 to-purple-500/10 border border-fuchsia-500/30">
               <h3 className="text-sm font-black text-slate-100 mb-1 flex items-center gap-2">
@@ -1315,6 +1615,48 @@ export default function App() {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* My Withdrawal Requests — status tracking */}
+            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800">
+              <h3 className="text-base font-black text-slate-100 mb-4 flex items-center gap-2">
+                <Send className="w-5 h-5 text-amber-400" />
+                My Withdrawal Requests
+              </h3>
+              {userWithdrawals.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 text-xs">
+                  No withdrawal requests yet.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {userWithdrawals.map((w) => (
+                    <div
+                      key={w.id}
+                      className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/60 flex items-center justify-between gap-3"
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-slate-200">
+                          ৳{w.amount} via {w.method}
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          {w.account} • {w.date}
+                        </div>
+                      </div>
+                      <span
+                        className={`text-[10px] font-black px-2.5 py-1 rounded-full whitespace-nowrap ${
+                          w.status === 'verified'
+                            ? 'bg-emerald-500/15 text-emerald-400'
+                            : w.status === 'rejected'
+                            ? 'bg-rose-500/15 text-rose-400'
+                            : 'bg-amber-500/15 text-amber-400'
+                        }`}
+                      >
+                        {w.status === 'verified' ? 'Sent' : w.status === 'rejected' ? 'Rejected' : 'Pending'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1554,6 +1896,120 @@ export default function App() {
           </div>
         )}
 
+        {/* TAB: SUPPORT GROUP */}
+        {activeTab === 'supportgroups' && (
+          <div className="space-y-4">
+            <div className="p-6 rounded-3xl bg-gradient-to-r from-sky-500/10 via-blue-500/10 to-transparent border border-sky-500/20">
+              <h2 className="text-xl font-black text-slate-100">Support Groups</h2>
+              <p className="text-xs text-slate-400 mt-1">Join our official community groups for updates, help, and networking.</p>
+            </div>
+            {(db.supportGroups || []).filter(g => g.active).length === 0 ? (
+              <div className="text-center py-12 text-slate-500 text-xs">No support groups added yet.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(db.supportGroups || [])
+                  .filter(g => g.active)
+                  .map((g) => (
+                    <a
+                      key={g.id}
+                      href={g.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-sky-500/40 flex items-center gap-3 transition-all"
+                    >
+                      <div className="text-2xl">{g.emoji || '💬'}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-black text-slate-100 truncate">{g.title}</div>
+                        <div className="text-[10px] text-sky-400 flex items-center gap-1 mt-0.5">
+                          Join Group <ExternalLink className="w-3 h-3" />
+                        </div>
+                      </div>
+                    </a>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: UPDATES (Moderator broadcast notices, full history) */}
+        {activeTab === 'updates' && (
+          <div className="space-y-4">
+            <div className="p-6 rounded-3xl bg-gradient-to-r from-sky-500/10 via-cyan-500/10 to-transparent border border-sky-500/20">
+              <h2 className="text-xl font-black text-slate-100">Latest Updates</h2>
+              <p className="text-xs text-slate-400 mt-1">Official announcements from the Moderator team.</p>
+            </div>
+            {(db.notices || []).length === 0 ? (
+              <div className="text-center py-12 text-slate-500 text-xs">No updates posted yet.</div>
+            ) : (
+              <div className="space-y-2.5">
+                {db.notices.map((notice) => (
+                  <div
+                    key={notice.id}
+                    className="p-4 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-start gap-3"
+                  >
+                    <div className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400 shrink-0">
+                      <Radio className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-black text-sky-300">{notice.title}</div>
+                      <div className="text-xs text-slate-300 mt-0.5 whitespace-pre-wrap break-words">{notice.message}</div>
+                      <div className="text-[10px] text-slate-500 mt-1">{notice.date}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: SEASON 2 */}
+        {activeTab === 'season2' && (
+          <div className="space-y-4">
+            <div className="p-6 rounded-3xl bg-gradient-to-r from-fuchsia-500/10 via-purple-500/10 to-transparent border border-fuchsia-500/20">
+              <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30">
+                New Season
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-slate-100 mt-2">SEASON 2 Tasks</h2>
+            </div>
+
+            {(db.settings?.season2ComingSoon ?? true) ? (
+              <div className="text-center py-16">
+                <div className="inline-flex p-4 rounded-3xl bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 mb-4">
+                  <Sparkles className="w-8 h-8" />
+                </div>
+                <h3 className="text-lg font-black text-slate-100">COMING SOON</h3>
+                <p className="text-xs text-slate-500 mt-1">New Season 2 tasks are on the way. Stay tuned!</p>
+              </div>
+            ) : (db.season2Tasks || []).filter(t => t.status === 'active').length === 0 ? (
+              <div className="text-center py-12 text-slate-500 text-xs">No Season 2 tasks available right now.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {(db.season2Tasks || [])
+                  .filter(t => t.status === 'active')
+                  .map((t) => (
+                    <div key={t.id} className="p-5 rounded-2xl bg-slate-900 border border-fuchsia-500/20">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="text-sm font-black text-slate-100">{t.title}</h3>
+                        <span className="text-xs font-black text-fuchsia-400 whitespace-nowrap">৳{t.reward}</span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1.5">{t.desc}</p>
+                      {t.link && (
+                        <a
+                          href={t.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-fuchsia-400 hover:text-fuchsia-300"
+                        >
+                          Open Task <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* TAB 8: MODERATOR DASHBOARD (FULL ADMIN ENGINE) */}
         {activeTab === 'moderator' && isModerator && (
           <ModeratorView
@@ -1570,6 +2026,9 @@ export default function App() {
             onRejectWithdrawal={(id, reason) => sendAction('REJECT_WITHDRAWAL', { id, reason })}
             onBroadcastNotif={(notif) => sendAction('SEND_NOTIFICATION', notif)}
             onAdjustBalance={handleAdjustBalance}
+            onBulkAdjustBalance={handleBulkAdjustBalance}
+            onApproveRegistration={handleApproveRegistration}
+            onRejectRegistration={handleRejectRegistration}
             onLogout={handleModeratorLogout}
             onToast={showToast}
           />
@@ -1743,7 +2202,107 @@ export default function App() {
       <OnboardingFlow
         isOpen={showOnboarding}
         onComplete={handleOnboardingComplete}
+        onSwitchToLogin={() => { setShowOnboarding(false); setShowLoginForm(true); }}
+        registrationFeeEnabled={db.settings?.registrationFeeEnabled ?? true}
+        feeBeforeDeadline={db.settings?.registrationFeeBeforeDeadline ?? 100}
+        feeAfterDeadline={db.settings?.registrationFeeAfterDeadline ?? 150}
+        deadlineIso={db.settings?.registrationDeadline || ''}
+        paymentNumber={db.settings?.registrationPaymentNumber || '01334788303'}
       />
+
+      {/* Login Modal for returning users */}
+      {showLoginForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+          <div className="relative w-full max-w-sm rounded-2xl bg-slate-900 border border-amber-500/30 shadow-2xl p-6 sm:p-8">
+            <div className="text-center mb-6">
+              <div className="inline-flex p-3 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 mb-3">
+                <UserCheck className="w-6 h-6" />
+              </div>
+              <h2 className="text-lg font-black text-slate-100">Welcome Back</h2>
+              <p className="text-xs text-slate-400 mt-1">Log in to continue earning</p>
+            </div>
+            <form onSubmit={handleLoginSubmit} className="space-y-3.5">
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="your.email@example.com"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">Password</label>
+                <input
+                  type="password"
+                  required
+                  value={loginPass}
+                  onChange={(e) => setLoginPass(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs mt-2 shadow-lg shadow-amber-500/20"
+              >
+                Log In
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowLoginForm(false); setShowOnboarding(true); }}
+                className="w-full text-center text-[11px] text-slate-400 hover:text-amber-400 transition-colors"
+              >
+                New here? <span className="font-bold underline">Create an account</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Pending Registration — waiting for Moderator payment verification */}
+      {pendingRegistrationId != null && (() => {
+        const entry = (db.pendingRegistrations || []).find(p => p.id === pendingRegistrationId);
+        if (!entry) return null;
+        if (entry.status === 'approved') return null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-md">
+            <div className="w-full max-w-sm rounded-2xl bg-slate-900 border border-amber-500/30 shadow-2xl p-6 sm:p-8 text-center">
+              {entry.status === 'pending' ? (
+                <>
+                  <div className="inline-flex p-3 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 mb-4 animate-pulse">
+                    <Clock className="w-7 h-7" />
+                  </div>
+                  <h2 className="text-lg font-black text-slate-100 mb-2">Verifying Your Payment</h2>
+                  <p className="text-xs text-slate-400 mb-4">
+                    Our Moderator team is checking your bKash Transaction ID. This usually takes a little while — keep this page open or check back later.
+                  </p>
+                  <div className="text-left bg-slate-950 rounded-xl p-3 border border-slate-800 text-[11px] text-slate-400 space-y-1 mb-4">
+                    <div>TrxID: <span className="text-slate-200 font-mono">{entry.trxId}</span></div>
+                    <div>Amount: <span className="text-amber-400 font-bold">৳{entry.amountPaid}</span></div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="inline-flex p-3 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/20 mb-4">
+                    <XCircle className="w-7 h-7" />
+                  </div>
+                  <h2 className="text-lg font-black text-slate-100 mb-2">Verification Failed</h2>
+                  <p className="text-xs text-slate-400 mb-4">{entry.rejectionReason || 'We could not verify your payment.'}</p>
+                </>
+              )}
+              <button
+                onClick={handleCancelPendingRegistration}
+                className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
+              >
+                {entry.status === 'rejected' ? 'Try Again' : 'Cancel & Start Over'}
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Footer */}
       <footer className="bg-slate-950 border-t border-slate-800/80 py-6 px-4 text-center text-xs text-slate-500">
