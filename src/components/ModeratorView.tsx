@@ -38,6 +38,9 @@ interface ModeratorViewProps {
   onRejectWithdrawal: (id: number, reason?: string) => void;
   onBroadcastNotif: (notif: { title: string; body: string; type?: 'info' | 'reward' | 'urgent'; targetUserId?: number | 'all' }) => void;
   onAdjustBalance: (userId: number, amount: number) => void;
+  onBulkAdjustBalance: (amount: number) => void;
+  onApproveRegistration: (id: number) => void;
+  onRejectRegistration: (id: number, reason?: string) => void;
   onLogout: () => void;
   onToast: (msg: string) => void;
 }
@@ -53,14 +56,32 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
   onRejectWithdrawal,
   onBroadcastNotif,
   onAdjustBalance,
+  onBulkAdjustBalance,
+  onApproveRegistration,
+  onRejectRegistration,
   onLogout,
   onToast
 }) => {
   const isFull = role === 'full';
-  const [activeTab, setActiveTab] = useState<'submissions' | 'withdrawals' | 'tasks' | 'earns' | 'movies' | 'apps' | 'users' | 'broadcast' | 'settings' | 'support' | 'submods' | 'requests' | 'notices' | 'promocodes'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'withdrawals' | 'tasks' | 'earns' | 'movies' | 'apps' | 'users' | 'broadcast' | 'settings' | 'support' | 'submods' | 'requests' | 'notices' | 'promocodes' | 'registrations' | 'supportgroups' | 'season2'>('submissions');
 
   // Balance top-up form (Full Moderator only)
   const [balanceDrafts, setBalanceDrafts] = useState<Record<number, string>>({});
+  const [bulkBalanceAmount, setBulkBalanceAmount] = useState('');
+
+  // Registration rejection reason drafts
+  const [regRejectDrafts, setRegRejectDrafts] = useState<Record<number, string>>({});
+
+  // Support Group form
+  const [groupTitle, setGroupTitle] = useState('');
+  const [groupUrl, setGroupUrl] = useState('');
+  const [groupEmoji, setGroupEmoji] = useState('💬');
+
+  // Season 2 task form
+  const [s2Title, setS2Title] = useState('');
+  const [s2Desc, setS2Desc] = useState('');
+  const [s2Reward, setS2Reward] = useState('');
+  const [s2Link, setS2Link] = useState('');
 
   // Support reply form
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
@@ -111,6 +132,12 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
   const [paymentPhone, setPaymentPhone] = useState(db.settings?.promotionPaymentNumber || '01334788303');
   const [minWithdraw, setMinWithdraw] = useState(String(db.settings?.minWithdrawal || 700));
   const [referralBonusInput, setReferralBonusInput] = useState(String(db.settings?.referralBonus ?? 25));
+  const [regFeeEnabled, setRegFeeEnabled] = useState(db.settings?.registrationFeeEnabled ?? true);
+  const [regPaymentNumber, setRegPaymentNumber] = useState(db.settings?.registrationPaymentNumber || '01334788303');
+  const [regFeeBefore, setRegFeeBefore] = useState(String(db.settings?.registrationFeeBeforeDeadline ?? 100));
+  const [regFeeAfter, setRegFeeAfter] = useState(String(db.settings?.registrationFeeAfterDeadline ?? 150));
+  const [apkUrl, setApkUrl] = useState(db.settings?.apkDownloadUrl || '');
+  const [season2Coming, setSeason2Coming] = useState(db.settings?.season2ComingSoon ?? true);
 
   // Promo Code form (Full Moderator only)
   const [promoCodeText, setPromoCodeText] = useState('');
@@ -240,11 +267,24 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
         broadcastBanner: bannerText,
         promotionPaymentNumber: paymentPhone,
         minWithdrawal: Number(minWithdraw) || 700,
-        referralBonus: isFull ? (Number(referralBonusInput) || 0) : (db.settings?.referralBonus ?? 25)
+        referralBonus: isFull ? (Number(referralBonusInput) || 0) : (db.settings?.referralBonus ?? 25),
+        registrationFeeEnabled: isFull ? regFeeEnabled : (db.settings?.registrationFeeEnabled ?? true),
+        registrationPaymentNumber: isFull ? regPaymentNumber : (db.settings?.registrationPaymentNumber ?? '01334788303'),
+        registrationFeeBeforeDeadline: isFull ? (Number(regFeeBefore) || 100) : (db.settings?.registrationFeeBeforeDeadline ?? 100),
+        registrationFeeAfterDeadline: isFull ? (Number(regFeeAfter) || 150) : (db.settings?.registrationFeeAfterDeadline ?? 150),
+        apkDownloadUrl: apkUrl,
+        season2ComingSoon: season2Coming
       }
     };
     onUpdateDb(updated);
     onToast('⚙️ Platform settings saved successfully!');
+  };
+
+  const handleResetRegistrationTimer = () => {
+    if (!isFull) return;
+    const newDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+    onUpdateDb({ ...db, settings: { ...db.settings, registrationDeadline: newDeadline } });
+    onToast('⏱️ Registration countdown reset to 48 hours.');
   };
 
   const handleAddPromoCode = (e: React.FormEvent) => {
@@ -342,14 +382,17 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
       <div className="flex gap-1.5 overflow-x-auto pb-2 border-b border-slate-800">
         {(isFull
           ? [
+              { id: 'registrations', label: `Registrations (${(db.pendingRegistrations || []).filter(p => p.status === 'pending').length})` },
               { id: 'submissions', label: `Task Proofs (${pendingSubmissions.length})` },
               { id: 'withdrawals', label: `Withdrawals (${pendingWithdrawals.length})` },
               { id: 'tasks', label: `Tasks (${db.tasks.length})` },
               { id: 'earns', label: `Daily Earns (${db.earns.length})` },
               { id: 'movies', label: `Movies (${db.movies.length})` },
               { id: 'apps', label: `Apps (${db.apps.length})` },
+              { id: 'season2', label: `Season 2 (${(db.season2Tasks || []).length})` },
               { id: 'requests', label: `Requests (${(db.contentRequests || []).filter(r => r.status === 'pending').length})` },
               { id: 'support', label: `Help Desk (${(db.support || []).filter(s => !s.reply).length})` },
+              { id: 'supportgroups', label: `Support Groups (${(db.supportGroups || []).length})` },
               { id: 'users', label: `Users (${db.users.length})` },
               { id: 'submods', label: `Sub-Moderators (${(db.subModerators || []).length})` },
               { id: 'promocodes', label: `Promo Codes (${(db.promoCodes || []).length})` },
@@ -358,14 +401,17 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
               { id: 'settings', label: 'Global Settings' }
             ]
           : [
+              { id: 'registrations', label: `Registrations (${(db.pendingRegistrations || []).filter(p => p.status === 'pending').length})` },
               { id: 'submissions', label: `Task Proofs (${pendingSubmissions.length})` },
               { id: 'withdrawals', label: `Withdrawals (${pendingWithdrawals.length})` },
               { id: 'tasks', label: `Tasks (${db.tasks.length})` },
               { id: 'earns', label: `Daily Earns (${db.earns.length})` },
               { id: 'movies', label: `Movies (${db.movies.length})` },
               { id: 'apps', label: `Apps (${db.apps.length})` },
+              { id: 'season2', label: `Season 2 (${(db.season2Tasks || []).length})` },
               { id: 'requests', label: `Requests (${(db.contentRequests || []).filter(r => r.status === 'pending').length})` },
               { id: 'support', label: `Help Desk (${(db.support || []).filter(s => !s.reply).length})` },
+              { id: 'supportgroups', label: `Support Groups (${(db.supportGroups || []).length})` },
               { id: 'users', label: `Users (${db.users.length})` },
               { id: 'notices', label: `Notices (${(db.notices || []).length})` },
               { id: 'broadcast', label: 'Broadcast Notif' },
@@ -882,6 +928,42 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
       {/* TAB 7: USERS */}
       {activeTab === 'users' && (
         <div className="space-y-4">
+          {isFull && (
+            <div className="p-5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30">
+              <h3 className="text-sm font-black text-emerald-300 mb-1 flex items-center gap-2">
+                <Coins className="w-4 h-4" /> Bulk Add Balance — All Users at Once
+              </h3>
+              <p className="text-[11px] text-slate-400 mb-3">
+                Enter an amount to instantly add it to every registered user's wallet ({db.users.length} users). This action cannot be undone.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="number"
+                  placeholder="৳ Amount for every user"
+                  value={bulkBalanceAmount}
+                  onChange={(e) => setBulkBalanceAmount(e.target.value)}
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+                />
+                <button
+                  onClick={() => {
+                    const amount = parseFloat(bulkBalanceAmount);
+                    if (!bulkBalanceAmount || isNaN(amount) || amount === 0) {
+                      onToast('❌ Enter a valid amount.');
+                      return;
+                    }
+                    if (!window.confirm(`Add ৳${amount} to ALL ${db.users.length} users? This cannot be undone.`)) return;
+                    onBulkAdjustBalance(amount);
+                    setBulkBalanceAmount('');
+                    onToast(`✅ ৳${amount} added to all ${db.users.length} users!`);
+                  }}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs whitespace-nowrap"
+                >
+                  Add to Everyone
+                </button>
+              </div>
+            </div>
+          )}
+
           <h3 className="text-sm font-bold text-slate-200">Registered Users Directory ({db.users.length})</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
@@ -1053,6 +1135,78 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
                 </div>
               )}
             </div>
+
+            {isFull && (
+              <>
+                <div className="pt-3 border-t border-slate-800">
+                  <h4 className="text-xs font-black text-amber-400 mb-3">রেজিস্ট্রেশন পেমেন্ট গেট</h4>
+
+                  <label className="flex items-center gap-2 mb-3 text-xs text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={regFeeEnabled}
+                      onChange={(e) => setRegFeeEnabled(e.target.checked)}
+                      className="w-4 h-4 accent-amber-500"
+                    />
+                    রেজিস্ট্রেশন ফি চালু রাখুন (বন্ধ করলে সবাই ফ্রি রেজিস্টার করতে পারবে)
+                  </label>
+
+                  <div className="space-y-2.5">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-400 block mb-1">bKash Receiving Number</label>
+                      <input
+                        type="text"
+                        value={regPaymentNumber}
+                        onChange={(e) => setRegPaymentNumber(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[11px] font-semibold text-slate-400 block mb-1">সময়সীমার আগে ফি (৳)</label>
+                        <input
+                          type="number"
+                          value={regFeeBefore}
+                          onChange={(e) => setRegFeeBefore(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-slate-400 block mb-1">সময়সীমার পরে ফি (৳)</label>
+                        <input
+                          type="number"
+                          value={regFeeAfter}
+                          onChange={(e) => setRegFeeAfter(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleResetRegistrationTimer}
+                      className="w-full py-2 rounded-xl bg-fuchsia-500/15 hover:bg-fuchsia-500/25 text-fuchsia-400 font-bold text-xs border border-fuchsia-500/30"
+                    >
+                      ⏱️ ৪৮ ঘণ্টার কাউন্টডাউন আবার শুরু করুন
+                    </button>
+                    <p className="text-[10px] text-slate-500">
+                      কাউন্টডাউন এখন যেখানে আছে: {db.settings?.registrationDeadline ? new Date(db.settings.registrationDeadline).toLocaleString() : '—'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-800">
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">APK ডাউনলোড লিংক</label>
+                  <input
+                    type="text"
+                    placeholder="https://..."
+                    value={apkUrl}
+                    onChange={(e) => setApkUrl(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">হেডারের "Download App" বাটন এই লিংকে নিয়ে যাবে।</p>
+                </div>
+              </>
+            )}
 
             <button
               type="submit"
@@ -1343,6 +1497,321 @@ export const ModeratorView: React.FC<ModeratorViewProps> = ({
                     </button>
                     <button
                       onClick={() => handleDeletePromoCode(pc.id)}
+                      className="p-1.5 rounded-lg bg-rose-500/15 text-rose-400"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB: REGISTRATIONS — Manual payment verification (Both Main & Sub Moderator) */}
+      {activeTab === 'registrations' && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-bold text-slate-200">
+            Pending Registrations ({(db.pendingRegistrations || []).filter(p => p.status === 'pending').length})
+          </h3>
+          <p className="text-[11px] text-slate-500">
+            চেক করে দেখুন bKash অ্যাপে টাকা এসেছে কিনা এবং Transaction ID মিলছে কিনা, তারপর Approve বা Reject করুন।
+          </p>
+          {(db.pendingRegistrations || []).filter(p => p.status === 'pending').length === 0 ? (
+            <p className="text-xs text-slate-500">কোনো পেন্ডিং রেজিস্ট্রেশন নেই।</p>
+          ) : (
+            (db.pendingRegistrations || [])
+              .filter(p => p.status === 'pending')
+              .map((reg) => (
+                <div key={reg.id} className="p-4 rounded-2xl bg-slate-900 border border-amber-500/30 space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                    <div>
+                      <div className="text-slate-500">Name</div>
+                      <div className="text-slate-200 font-bold">{reg.name}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">Email</div>
+                      <div className="text-slate-200 font-bold truncate">{reg.email}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">bKash Number</div>
+                      <div className="text-slate-200 font-mono font-bold">{reg.bkashNumber || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">Amount</div>
+                      <div className="text-amber-400 font-black">৳{reg.amountPaid}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 bg-slate-950 rounded-xl px-3 py-2 border border-slate-800">
+                    <span className="text-[11px] text-slate-400">TrxID:</span>
+                    <span className="text-xs font-mono font-black text-slate-100">{reg.trxId}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500">Submitted: {reg.date}</div>
+
+                  <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                    <button
+                      onClick={() => onApproveRegistration(reg.id)}
+                      className="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" /> Approve
+                    </button>
+                    <div className="flex-1 flex gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="Rejection reason..."
+                        value={regRejectDrafts[reg.id] ?? ''}
+                        onChange={(e) => setRegRejectDrafts(prev => ({ ...prev, [reg.id]: e.target.value }))}
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-[11px] text-slate-200"
+                      />
+                      <button
+                        onClick={() => {
+                          onRejectRegistration(reg.id, regRejectDrafts[reg.id] || 'Payment could not be verified');
+                          setRegRejectDrafts(prev => ({ ...prev, [reg.id]: '' }));
+                        }}
+                        className="px-3 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-white font-black text-xs whitespace-nowrap flex items-center gap-1"
+                      >
+                        <XCircle className="w-3.5 h-3.5" /> Reject
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+          )}
+
+          {(db.pendingRegistrations || []).filter(p => p.status !== 'pending').length > 0 && (
+            <div className="pt-4">
+              <h4 className="text-xs font-bold text-slate-400 mb-2">সাম্প্রতিক ইতিহাস</h4>
+              <div className="space-y-1.5">
+                {(db.pendingRegistrations || [])
+                  .filter(p => p.status !== 'pending')
+                  .slice(0, 15)
+                  .map((reg) => (
+                    <div key={reg.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/60 text-[11px]">
+                      <span className="text-slate-300">{reg.name} ({reg.email})</span>
+                      <span className={reg.status === 'approved' ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                        {reg.status === 'approved' ? 'Approved ✓' : 'Rejected ✕'}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: SUPPORT GROUPS management */}
+      {activeTab === 'supportgroups' && (
+        <div className="space-y-6">
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <h3 className="text-sm font-bold text-slate-200 mb-3">নতুন সাপোর্ট গ্রুপ যোগ করুন</h3>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!groupTitle.trim() || !groupUrl.trim()) {
+                  onToast('❌ Title ও Link দুটোই দিতে হবে।');
+                  return;
+                }
+                const newGroup = {
+                  id: Date.now(),
+                  title: groupTitle.trim(),
+                  url: groupUrl.trim(),
+                  emoji: groupEmoji.trim() || '💬',
+                  active: true,
+                  createdAt: new Date().toLocaleString()
+                };
+                onUpdateDb({ ...db, supportGroups: [newGroup, ...(db.supportGroups || [])] });
+                setGroupTitle('');
+                setGroupUrl('');
+                setGroupEmoji('💬');
+                onToast('✅ Support group যোগ হয়েছে।');
+              }}
+              className="flex flex-col sm:flex-row gap-2"
+            >
+              <input
+                type="text"
+                placeholder="Emoji"
+                value={groupEmoji}
+                onChange={(e) => setGroupEmoji(e.target.value)}
+                className="w-full sm:w-16 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 text-center"
+              />
+              <input
+                type="text"
+                placeholder="Group Title (e.g. Official Telegram)"
+                value={groupTitle}
+                onChange={(e) => setGroupTitle(e.target.value)}
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+              />
+              <input
+                type="text"
+                placeholder="https://..."
+                value={groupUrl}
+                onChange={(e) => setGroupUrl(e.target.value)}
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+              />
+              <button type="submit" className="px-4 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-black text-xs whitespace-nowrap">
+                Add Group
+              </button>
+            </form>
+          </div>
+
+          <div className="space-y-2">
+            {(db.supportGroups || []).length === 0 ? (
+              <p className="text-xs text-slate-500">এখনো কোনো সাপোর্ট গ্রুপ যোগ করা হয়নি।</p>
+            ) : (
+              (db.supportGroups || []).map((g) => (
+                <div key={g.id} className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-lg">{g.emoji || '💬'}</span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-black text-slate-100 truncate">{g.title}</div>
+                      <div className="text-[10px] text-slate-500 truncate">{g.url}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${g.active ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                      {g.active ? 'Active' : 'Hidden'}
+                    </span>
+                    <button
+                      onClick={() => {
+                        const updated = (db.supportGroups || []).map(x => x.id === g.id ? { ...x, active: !x.active } : x);
+                        onUpdateDb({ ...db, supportGroups: updated });
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 text-[10px] font-bold"
+                    >
+                      {g.active ? 'Hide' : 'Show'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const updated = (db.supportGroups || []).filter(x => x.id !== g.id);
+                        onUpdateDb({ ...db, supportGroups: updated });
+                        onToast('🗑️ Group removed.');
+                      }}
+                      className="p-1.5 rounded-lg bg-rose-500/15 text-rose-400"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB: SEASON 2 management */}
+      {activeTab === 'season2' && (
+        <div className="space-y-6">
+          <div className="p-5 rounded-2xl bg-fuchsia-500/10 border border-fuchsia-500/30 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-fuchsia-300">Season 2 — "Coming Soon" মোড</h3>
+              <p className="text-[11px] text-slate-400 mt-1">অন রাখলে ইউজাররা শুধু "Coming Soon" দেখবে, অফ করলে নিচের টাস্কগুলো দেখতে পাবে।</p>
+            </div>
+            <button
+              onClick={() => {
+                const newVal = !season2Coming;
+                setSeason2Coming(newVal);
+                onUpdateDb({ ...db, settings: { ...db.settings, season2ComingSoon: newVal } });
+                onToast(newVal ? '🔒 Season 2 আবার "Coming Soon" করা হলো।' : '🚀 Season 2 চালু হয়ে গেছে!');
+              }}
+              className={`px-4 py-2 rounded-xl font-black text-xs whitespace-nowrap ${
+                season2Coming ? 'bg-slate-800 text-slate-300' : 'bg-fuchsia-500 text-white'
+              }`}
+            >
+              {season2Coming ? 'Coming Soon চালু আছে' : 'লাইভ আছে'}
+            </button>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <h3 className="text-sm font-bold text-slate-200 mb-3">নতুন Season 2 টাস্ক যোগ করুন</h3>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const rewardNum = Number(s2Reward);
+                if (!s2Title.trim() || !s2Desc.trim() || !rewardNum) {
+                  onToast('❌ Title, Description ও Reward দিতে হবে।');
+                  return;
+                }
+                const newTask = {
+                  id: Date.now(),
+                  title: s2Title.trim(),
+                  desc: s2Desc.trim(),
+                  reward: rewardNum,
+                  status: 'active' as const,
+                  link: s2Link.trim() || undefined,
+                  createdAt: new Date().toLocaleString()
+                };
+                onUpdateDb({ ...db, season2Tasks: [newTask, ...(db.season2Tasks || [])] });
+                setS2Title('');
+                setS2Desc('');
+                setS2Reward('');
+                setS2Link('');
+                onToast('✅ Season 2 টাস্ক যোগ হয়েছে।');
+              }}
+              className="space-y-2.5"
+            >
+              <input
+                type="text"
+                placeholder="Task Title"
+                value={s2Title}
+                onChange={(e) => setS2Title(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+              />
+              <textarea
+                placeholder="Task Description"
+                value={s2Desc}
+                onChange={(e) => setS2Desc(e.target.value)}
+                rows={2}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  placeholder="৳ Reward"
+                  value={s2Reward}
+                  onChange={(e) => setS2Reward(e.target.value)}
+                  className="w-32 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+                />
+                <input
+                  type="text"
+                  placeholder="Task Link (optional)"
+                  value={s2Link}
+                  onChange={(e) => setS2Link(e.target.value)}
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200"
+                />
+              </div>
+              <button type="submit" className="w-full py-2.5 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-400 text-white font-black text-xs">
+                Add Season 2 Task
+              </button>
+            </form>
+          </div>
+
+          <div className="space-y-2">
+            {(db.season2Tasks || []).length === 0 ? (
+              <p className="text-xs text-slate-500">এখনো কোনো Season 2 টাস্ক যোগ করা হয়নি।</p>
+            ) : (
+              (db.season2Tasks || []).map((t) => (
+                <div key={t.id} className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-black text-slate-100 truncate">{t.title}</div>
+                    <div className="text-[10px] text-slate-500">৳{t.reward} • {t.status}</div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        const updated = (db.season2Tasks || []).map(x => x.id === t.id ? { ...x, status: (x.status === 'active' ? 'paused' : 'active') as 'active' | 'paused' } : x);
+                        onUpdateDb({ ...db, season2Tasks: updated });
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 text-[10px] font-bold"
+                    >
+                      {t.status === 'active' ? 'Pause' : 'Activate'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const updated = (db.season2Tasks || []).filter(x => x.id !== t.id);
+                        onUpdateDb({ ...db, season2Tasks: updated });
+                        onToast('🗑️ Task removed.');
+                      }}
                       className="p-1.5 rounded-lg bg-rose-500/15 text-rose-400"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
