@@ -82,21 +82,20 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
 
   const handleStep1Continue = () => setStep(2);
 
-  const handleStep2Continue = (e: React.FormEvent) => {
+  const handleFinalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !email || !pass) return;
+
     if (!registrationFeeEnabled) {
       onComplete({ name, email, pass, country, language, referralId: referralId.trim() || undefined });
       return;
     }
-    setStep(3);
-  };
 
-  const handleFinalSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
     const hasBypass = bypassCode.trim() !== '';
     const hasPaymentInfo = bkashNumber.trim() !== '' && trxId.trim() !== '';
-    if (!hasBypass && !hasPaymentInfo) return;
+    if (!hasBypass && !hasPaymentInfo) {
+      return;
+    }
 
     onComplete({
       name,
@@ -115,6 +114,14 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   const copyNumber = () => {
     navigator.clipboard?.writeText(paymentNumber).catch(() => {});
   };
+
+  const canSubmit =
+    name.trim() !== '' &&
+    email.trim() !== '' &&
+    pass.trim() !== '' &&
+    (!registrationFeeEnabled ||
+      bypassCode.trim() !== '' ||
+      (bkashNumber.trim() !== '' && trxId.trim() !== ''));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md overflow-y-auto">
@@ -180,8 +187,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               Already have an account? <span className="font-bold underline">Log in</span>
             </button>
           </div>
-        ) : step === 2 ? (
-          <form onSubmit={handleStep2Continue} className="space-y-3.5">
+        ) : (
+          <form onSubmit={handleFinalSubmit} className="space-y-3.5">
             <div>
               <label className="text-xs font-semibold text-slate-300 block mb-1">Full Name</label>
               <input
@@ -229,6 +236,88 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               />
             </div>
 
+            {registrationFeeEnabled && (
+              <>
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 mt-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Wallet className="w-4 h-4 text-amber-400" />
+                    <h3 className="text-sm font-black text-amber-300">Registration Fee: ৳{currentFee}</h3>
+                  </div>
+
+                  {!expired && (
+                    <div className="flex items-center gap-1.5 mb-3 text-[11px] text-slate-300">
+                      <Clock className="w-3.5 h-3.5 text-fuchsia-400" />
+                      <span>Price rises to ৳{feeAfterDeadline} in:</span>
+                      <span className="font-mono font-black text-fuchsia-400">
+                        {d}d {String(h).padStart(2, '0')}h {String(m).padStart(2, '0')}m {String(s).padStart(2, '0')}s
+                      </span>
+                    </div>
+                  )}
+                  {expired && (
+                    <div className="mb-3 text-[11px] font-black text-rose-400">⏰ TIME OVER — Regular price now applies</div>
+                  )}
+
+                  <div className="flex items-center justify-between bg-slate-950 rounded-xl px-3 py-2.5 border border-slate-800 mb-3">
+                    <span className="font-mono font-black text-slate-100">{paymentNumber}</span>
+                    <button type="button" onClick={copyNumber} className="text-amber-400 hover:text-amber-300 flex items-center gap-1 text-[10px] font-bold">
+                      <Copy className="w-3 h-3" /> Copy
+                    </button>
+                  </div>
+
+                  <ul className="text-[11px] text-slate-400 space-y-1 list-disc list-inside">
+                    <li>শুধুমাত্র <strong className="text-slate-200">বিকাশ</strong>-এ টাকা দিতে হবে</li>
+                    <li>শুধুমাত্র <strong className="text-slate-200">Send Money</strong> করতে হবে</li>
+                    <li>শুধুমাত্র <strong className="text-slate-200">Personal নাম্বারে</strong> Send Money করতে হবে</li>
+                    <li>কারণ এতে লেনদেনে খরচ কম ও নিরাপদ</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Your bKash Number (sent from)</label>
+                  <input
+                    type="text"
+                    value={bkashNumber}
+                    onChange={(e) => setBkashNumber(e.target.value)}
+                    placeholder="01XXXXXXXXX"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Transaction ID (TrxID)</label>
+                  <input
+                    type="text"
+                    value={trxId}
+                    onChange={(e) => setTrxId(e.target.value)}
+                    placeholder="e.g. 9G7H2K1XYZ"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowBypass((v) => !v)}
+                  className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-300"
+                >
+                  <KeyRound className="w-3.5 h-3.5" /> Are you a Moderator? Login here
+                </button>
+                {showBypass && (
+                  <input
+                    type="text"
+                    value={bypassCode}
+                    onChange={(e) => setBypassCode(e.target.value)}
+                    placeholder="Enter Moderator / Sub-Moderator Secret Code"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-fuchsia-500"
+                  />
+                )}
+                {bypassCode.trim() !== '' && (
+                  <p className="text-[10px] text-fuchsia-400">
+                    ✓ Moderator code entered — payment fields above will be skipped.
+                  </p>
+                )}
+              </>
+            )}
+
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
@@ -239,106 +328,14 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               </button>
               <button
                 type="submit"
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
+                disabled={!canSubmit}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
               >
                 {registrationFeeEnabled ? (
-                  <>Continue to Payment <ArrowRight className="w-4 h-4" /></>
+                  <><ShieldCheck className="w-4 h-4" /> Submit for Verification</>
                 ) : (
                   <><UserCheck className="w-4 h-4" /> Complete Registration</>
                 )}
-              </button>
-            </div>
-          </form>
-        ) : (
-          <form onSubmit={handleFinalSubmit} className="space-y-4">
-            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30">
-              <div className="flex items-center gap-2 mb-2">
-                <Wallet className="w-4 h-4 text-amber-400" />
-                <h3 className="text-sm font-black text-amber-300">Registration Fee: ৳{currentFee}</h3>
-              </div>
-
-              {!expired && (
-                <div className="flex items-center gap-1.5 mb-3 text-[11px] text-slate-300">
-                  <Clock className="w-3.5 h-3.5 text-fuchsia-400" />
-                  <span>Price rises to ৳{feeAfterDeadline} in:</span>
-                  <span className="font-mono font-black text-fuchsia-400">
-                    {d}d {String(h).padStart(2, '0')}h {String(m).padStart(2, '0')}m {String(s).padStart(2, '0')}s
-                  </span>
-                </div>
-              )}
-              {expired && (
-                <div className="mb-3 text-[11px] font-black text-rose-400">⏰ TIME OVER — Regular price now applies</div>
-              )}
-
-              <div className="text-xs text-slate-300 space-y-1 mb-3">
-                <div className="flex items-center justify-between bg-slate-950 rounded-xl px-3 py-2.5 border border-slate-800">
-                  <span className="font-mono font-black text-slate-100">{paymentNumber}</span>
-                  <button type="button" onClick={copyNumber} className="text-amber-400 hover:text-amber-300 flex items-center gap-1 text-[10px] font-bold">
-                    <Copy className="w-3 h-3" /> Copy
-                  </button>
-                </div>
-              </div>
-
-              <ul className="text-[11px] text-slate-400 space-y-1 list-disc list-inside">
-                <li>শুধুমাত্র <strong className="text-slate-200">বিকাশ</strong>-এ টাকা দিতে হবে</li>
-                <li>শুধুমাত্র <strong className="text-slate-200">Send Money</strong> করতে হবে</li>
-                <li>শুধুমাত্র <strong className="text-slate-200">Personal নাম্বারে</strong> Send Money করতে হবে</li>
-                <li>কারণ এতে লেনদেনে খরচ কম ও নিরাপদ</li>
-              </ul>
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">Your bKash Number (sent from)</label>
-              <input
-                type="text"
-                value={bkashNumber}
-                onChange={(e) => setBkashNumber(e.target.value)}
-                placeholder="01XXXXXXXXX"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">Transaction ID (TrxID)</label>
-              <input
-                type="text"
-                value={trxId}
-                onChange={(e) => setTrxId(e.target.value)}
-                placeholder="e.g. 9G7H2K1XYZ"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShowBypass((v) => !v)}
-              className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-300"
-            >
-              <KeyRound className="w-3.5 h-3.5" /> Have a Moderator Code?
-            </button>
-            {showBypass && (
-              <input
-                type="text"
-                value={bypassCode}
-                onChange={(e) => setBypassCode(e.target.value)}
-                placeholder="Enter Moderator / Sub-Moderator Secret Code"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-fuchsia-500"
-              />
-            )}
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setStep(2)}
-                className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700"
-              >
-                Back
-              </button>
-              <button
-                type="submit"
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
-              >
-                <ShieldCheck className="w-4 h-4" /> Submit for Verification
               </button>
             </div>
           </form>
