@@ -809,7 +809,7 @@ export default function App() {
               <div className="flex items-center gap-2 text-[11px] text-slate-400">
                 <span className="flex items-center gap-1">
                   <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                  {onlineCount} Live Active
+                  {isModerator ? `${onlineCount} Live Active` : 'Live'}
                 </span>
                 <span>•</span>
                 <span>Auto Sync v2.5</span>
